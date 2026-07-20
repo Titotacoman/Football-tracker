@@ -1,11 +1,20 @@
 // Core polling flow: football-data.org -> normalized rows -> Supabase.
-// Shared by the local script (scripts/poll-fd.mjs) and the Netlify
-// scheduled function (netlify/functions/poll.mjs). Idempotent.
+// Shared by the local script (scripts/poll-fd.mjs), the Netlify scheduled
+// function (poll cron), and the track function (immediate fill of a newly
+// added league). Idempotent.
+//
+// Multi-league strategy (HANDOFF.md round-robin): poll only tracked
+// leagues, at most MAX_LEAGUES_PER_RUN per tick to stay inside both the
+// 10 req/min football-data cap and the function timeout. Leagues with a
+// match in a ±3h window jump the queue; ties broken by stalest sync.
 import { requireKey, getJson } from "./util.mjs";
 import { db } from "./supabase.mjs";
 import { seasonYear, normalizeTeam, normalizeMatch, normalizeStandingRow } from "./normalize-fd.mjs";
+import { leagueByCode } from "./leagues.mjs";
 
 const BASE = "https://api.football-data.org/v4";
+const MAX_LEAGUES_PER_RUN = 3;
+const LIVE_WINDOW_MS = 3 * 3600_000;
 
 // Honor the provider's auto-throttle contract: if the minute budget is
 // exhausted, wait it out before the next call.
@@ -27,65 +36,108 @@ async function markSync(job, ok, note = null) {
   await db.upsert("sync_state", [{ job, last_run: now, ...(ok ? { last_ok: now } : {}), note }], "job");
 }
 
-export async function runPoll() {
-  const headers = { "X-Auth-Token": requireKey("FOOTBALL_DATA_KEY") };
-  try {
-    // 1. League row (PL). Provider ids per HANDOFF.md.
-    const [league] = await db.upsert(
-      "leagues",
-      [{ code: "PL", name: "Premier League", country: "England", fd_id: 2021, tsdb_id: 4328, af_id: 39 }],
-      "code",
-    );
-    console.log(`league: ${league.name} (id ${league.id})`);
+// Ensure a league from the registry exists in the DB; returns the row.
+export async function ensureLeague(code) {
+  const reg = leagueByCode(code);
+  if (!reg) throw new Error(`Unsupported league code: ${code}`);
+  const [row] = await db.upsert("leagues", [reg], "code");
+  return row;
+}
 
-    // 2. Current-season matches (single call returns all 380).
-    const matchData = await fdGet("/competitions/PL/matches", headers);
-    const matches = matchData.matches;
-    const season = seasonYear(matches[0].season);
-    console.log(`fetched ${matches.length} matches, season ${season}-${(season + 1) % 100}`);
+async function pollLeague(code, headers) {
+  const league = await ensureLeague(code);
 
-    // 3. Teams present in those matches.
-    const fdTeams = new Map();
-    for (const m of matches) {
-      fdTeams.set(m.homeTeam.id, m.homeTeam);
-      fdTeams.set(m.awayTeam.id, m.awayTeam);
-    }
-    const teamRows = await db.upsert("teams", [...fdTeams.values()].map(normalizeTeam), "fd_id");
-    const teamIds = new Map(teamRows.map((t) => [t.fd_id, t.id]));
-    console.log(`upserted ${teamRows.length} teams`);
-
-    // 4. Matches.
-    const matchRows = await db.upsert(
-      "matches",
-      matches.map((m) => normalizeMatch(m, league.id, teamIds)),
-      "fd_id",
-    );
-    console.log(`upserted ${matchRows.length} matches`);
-
-    // 5. Standings (TOTAL table).
-    const standingsData = await fdGet("/competitions/PL/standings", headers);
-    const table = standingsData.standings.find((s) => s.type === "TOTAL")?.table ?? [];
-    if (table.length) {
-      await db.upsert(
-        "standings",
-        table.map((row) => normalizeStandingRow(row, league.id, season, teamIds)),
-        "league_id,season,team_id",
-      );
-    }
-    console.log(`upserted ${table.length} standings rows`);
-
-    // 6. MVP tracking: ensure the PL itself is a tracked selection.
-    const existing = await db.select("user_selections", { kind: "eq.league", league_id: `eq.${league.id}` });
-    if (existing.length === 0) {
-      await db.insert("user_selections", [{ kind: "league", league_id: league.id }]);
-      console.log("added default selection: Premier League");
-    }
-
-    await markSync("fd:matches", true);
-    await markSync("fd:standings", true);
-    return { ok: true, matches: matchRows.length };
-  } catch (err) {
-    await markSync("fd:matches", false, err.message.slice(0, 200)).catch(() => {});
-    throw err;
+  const matchData = await fdGet(`/competitions/${code}/matches`, headers);
+  const matches = matchData.matches ?? [];
+  if (matches.length === 0) {
+    console.log(`${code}: no fixtures published yet`);
+    await markSync(`fd:${code}`, true, "no fixtures");
+    return;
   }
+  const season = seasonYear(matches[0].season);
+
+  const fdTeams = new Map();
+  for (const m of matches) {
+    fdTeams.set(m.homeTeam.id, m.homeTeam);
+    fdTeams.set(m.awayTeam.id, m.awayTeam);
+  }
+  const teamRows = await db.upsert("teams", [...fdTeams.values()].map(normalizeTeam), "fd_id");
+  const teamIds = new Map(teamRows.map((t) => [t.fd_id, t.id]));
+
+  await db.upsert("matches", matches.map((m) => normalizeMatch(m, league.id, teamIds)), "fd_id");
+
+  // Standings: only league-format tables (exactly one TOTAL table).
+  // Cup group stages would interleave groups into one table — skip those.
+  const standingsData = await fdGet(`/competitions/${code}/standings`, headers);
+  const totals = (standingsData.standings ?? []).filter((s) => s.type === "TOTAL");
+  if (totals.length === 1) {
+    await db.upsert(
+      "standings",
+      totals[0].table.map((row) => normalizeStandingRow(row, league.id, season, teamIds)),
+      "league_id,season,team_id",
+    );
+  }
+
+  await markSync(`fd:${code}`, true);
+  console.log(`${code}: ${matches.length} matches, ${teamRows.length} teams, season ${season}`);
+}
+
+async function pickRotation(trackedCodes, leagueIdsByCode) {
+  const sync = await db.select("sync_state", { select: "job,last_ok" });
+  const lastOk = new Map(sync.map((s) => [s.job, s.last_ok]));
+
+  // Leagues with a match inside the live window get priority.
+  const now = Date.now();
+  const windowMatches = await db.select("matches", {
+    select: "league_id",
+    status: "in.(SCHEDULED,TIMED,IN_PLAY,PAUSED)",
+    and: `(utc_date.gte.${new Date(now - LIVE_WINDOW_MS).toISOString()},utc_date.lte.${new Date(now + LIVE_WINDOW_MS).toISOString()})`,
+  });
+  const hotLeagueIds = new Set(windowMatches.map((m) => m.league_id));
+
+  return trackedCodes
+    .map((code) => ({
+      code,
+      hot: hotLeagueIds.has(leagueIdsByCode.get(code)) ? 0 : 1,
+      age: lastOk.get(`fd:${code}`) ?? "", // "" sorts before any timestamp = never-synced first
+    }))
+    .sort((a, b) => a.hot - b.hot || (a.age < b.age ? -1 : 1))
+    .slice(0, MAX_LEAGUES_PER_RUN)
+    .map((l) => l.code);
+}
+
+// codes: poll exactly these leagues (used by the track function).
+// Otherwise: rotate over tracked leagues.
+export async function runPoll({ codes } = {}) {
+  const headers = { "X-Auth-Token": requireKey("FOOTBALL_DATA_KEY") };
+
+  let targets = codes;
+  if (!targets) {
+    const selections = await db.select("user_selections", {
+      select: "league:leagues(code,id)",
+      kind: "eq.league",
+    });
+    if (selections.length === 0) {
+      // Bootstrap: track the PL by default.
+      const pl = await ensureLeague("PL");
+      await db.insert("user_selections", [{ kind: "league", league_id: pl.id }]);
+      selections.push({ league: { code: "PL", id: pl.id } });
+    }
+    const tracked = selections.map((s) => s.league.code);
+    const idsByCode = new Map(selections.map((s) => [s.league.code, s.league.id]));
+    targets = await pickRotation(tracked, idsByCode);
+  }
+
+  const results = {};
+  for (const code of targets) {
+    try {
+      await pollLeague(code, headers);
+      results[code] = "ok";
+    } catch (err) {
+      console.error(`${code}: ${err.message}`);
+      await markSync(`fd:${code}`, false, err.message.slice(0, 200)).catch(() => {});
+      results[code] = err.message;
+    }
+  }
+  return results;
 }

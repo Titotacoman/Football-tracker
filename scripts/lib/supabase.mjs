@@ -41,4 +41,6 @@ export const db = {
     }),
   insert: (table, rows) =>
     request("POST", table, { body: rows, prefer: "return=representation" }),
+  delete: (table, params) =>
+    request("DELETE", table, { params, prefer: "return=representation" }),
 };

@@ -36,6 +36,21 @@ body {
 nav a { color: var(--muted); text-decoration: none; margin-left: 18px; font-weight: 600; }
 nav a.active { color: var(--accent); }
 
+#leagueSel {
+  background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 10px; font-weight: 600; max-width: 180px;
+}
+
+.match.fav { border-left: 3px solid var(--accent); }
+.star {
+  background: none; border: none; cursor: pointer;
+  color: var(--muted); font-size: 16px; padding: 0 2px;
+}
+.star.on { color: var(--accent); }
+.untrack { text-align: center; margin-top: 26px; }
+.untrack a { color: var(--muted); font-size: 12px; }
+
 .hero {
   background: linear-gradient(135deg, var(--surface), var(--surface-2));
   border: 1px solid var(--border);

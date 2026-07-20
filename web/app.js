@@ -1,8 +1,12 @@
 // Hash-routed SPA: #fixtures (default), #standings, #match/<id>.
+// League scope: dropdown in the header, persisted in localStorage.
+// Favorites: star teams in the standings; starred teams' fixtures highlight.
 import { api } from "./api.js";
+import { SUPPORTED_LEAGUES } from "./leagues.js";
 
 const view = document.getElementById("view");
 const hero = document.getElementById("hero");
+const leagueSel = document.getElementById("leagueSel");
 
 const fmtDay = new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric" });
 const fmtTime = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
@@ -13,6 +17,57 @@ const STATUS_LABEL = {
 };
 const isPlayed = (s) => ["IN_PLAY", "PAUSED", "FINISHED"].includes(s);
 
+// ---- league + favorites state --------------------------------------------
+let tracked = [];        // [{id, code, name}] leagues in user_selections
+let league = null;       // current {id, code, name}
+let favorites = new Set(); // team ids
+let matchdayCache = new Map(); // league.id -> [{matchday, status}]
+
+async function loadState() {
+  const [sel, favs] = await Promise.all([api.trackedLeagues(), api.favoriteTeamIds()]);
+  tracked = sel.map((s) => s.league).filter(Boolean);
+  favorites = favs;
+  const savedCode = localStorage.getItem("league");
+  league = tracked.find((l) => l.code === savedCode) ?? tracked[0] ?? null;
+}
+
+function renderLeagueSelect() {
+  const trackedCodes = new Set(tracked.map((l) => l.code));
+  const addable = SUPPORTED_LEAGUES.filter((l) => !trackedCodes.has(l.code));
+  leagueSel.innerHTML = `
+    ${tracked.map((l) => `<option value="${l.code}" ${l.code === league?.code ? "selected" : ""}>${l.name}</option>`).join("")}
+    ${addable.length ? `<optgroup label="── Add a league ──">
+      ${addable.map((l) => `<option value="add:${l.code}">＋ ${l.name}</option>`).join("")}
+    </optgroup>` : ""}`;
+}
+
+leagueSel.addEventListener("change", async () => {
+  const val = leagueSel.value;
+  if (val.startsWith("add:")) {
+    const code = val.slice(4);
+    const name = SUPPORTED_LEAGUES.find((l) => l.code === code)?.name ?? code;
+    leagueSel.disabled = true;
+    view.innerHTML = `<p class="muted">Adding ${name} — fetching fixtures…</p>`;
+    try {
+      await api.track({ action: "add", kind: "league", code });
+      await loadState();
+      league = tracked.find((l) => l.code === code) ?? league;
+      localStorage.setItem("league", league.code);
+    } catch (err) {
+      view.innerHTML = `<p class="muted">Couldn't add ${name}: ${err.message}</p>`;
+    }
+    leagueSel.disabled = false;
+    renderLeagueSelect();
+    route();
+    return;
+  }
+  league = tracked.find((l) => l.code === val) ?? league;
+  localStorage.setItem("league", league.code);
+  location.hash = location.hash.startsWith("#standings") ? "#standings" : "#fixtures";
+  route();
+});
+
+// ---- shared render helpers ------------------------------------------------
 function crest(team) {
   return team.crest_url
     ? `<img class="crest" src="${team.crest_url}" alt="" loading="lazy" />`
@@ -26,10 +81,11 @@ function scoreOrTime(m) {
 
 function matchRow(m) {
   const badge = STATUS_LABEL[m.status];
-  return `<a class="match ${m.status === "IN_PLAY" ? "live" : ""}" href="#match/${m.id}">
-    <span class="team home">${m.home.short_name ?? m.home.name} ${crest(m.home)}</span>
+  const fav = favorites.has(m.home.id) || favorites.has(m.away.id);
+  return `<a class="match ${m.status === "IN_PLAY" ? "live" : ""} ${fav ? "fav" : ""}" href="#match/${m.id}">
+    <span class="team home">${favorites.has(m.home.id) ? "★ " : ""}${m.home.short_name ?? m.home.name} ${crest(m.home)}</span>
     ${scoreOrTime(m)}
-    <span class="team away">${crest(m.away)} ${m.away.short_name ?? m.away.name}</span>
+    <span class="team away">${crest(m.away)} ${m.away.short_name ?? m.away.name}${favorites.has(m.away.id) ? " ★" : ""}</span>
     ${badge ? `<span class="badge ${m.status}">${badge}</span>` : ""}
   </a>`;
 }
@@ -54,18 +110,18 @@ async function renderHero() {
 }
 
 // ---- fixtures -------------------------------------------------------------
-let matchdayCache = null; // [{matchday, status, utc_date}]
-
 async function defaultMatchday() {
-  matchdayCache ??= await api.matchdays();
-  const upcoming = matchdayCache.find((m) => !isPlayed(m.status) && m.status !== "FINISHED");
-  return upcoming?.matchday ?? matchdayCache.at(-1)?.matchday ?? 1;
+  if (!matchdayCache.has(league.id)) matchdayCache.set(league.id, await api.matchdays(league.id));
+  const days = matchdayCache.get(league.id);
+  const upcoming = days.find((m) => !isPlayed(m.status));
+  return upcoming?.matchday ?? days.at(-1)?.matchday ?? 1;
 }
 
 async function renderFixtures(matchday) {
+  if (!league) { view.innerHTML = `<p class="muted">No league tracked yet — pick one from the dropdown.</p>`; return; }
   matchday ??= await defaultMatchday();
-  const matches = await api.fixtures(matchday);
-  const total = Math.max(...(matchdayCache ?? []).map((m) => m.matchday), matchday);
+  const matches = await api.fixtures(league.id, matchday);
+  const total = Math.max(...(matchdayCache.get(league.id) ?? []).map((m) => m.matchday), matchday);
 
   const byDay = new Map();
   for (const m of matches) {
@@ -79,12 +135,22 @@ async function renderFixtures(matchday) {
       <h2>Matchday ${matchday}</h2>
       <button ${matchday >= total ? "disabled" : ""} data-md="${matchday + 1}">›</button>
     </div>
+    ${matches.length === 0 ? `<p class="muted center">No fixtures published yet for this competition.</p>` : ""}
     ${[...byDay].map(([day, ms]) => `
       <h3 class="day">${day}</h3>
-      <div class="matches">${ms.map(matchRow).join("")}</div>`).join("")}`;
+      <div class="matches">${ms.map(matchRow).join("")}</div>`).join("")}
+    ${league.code !== "PL" ? `<p class="untrack"><a href="#" id="untrackLeague">Untrack ${league.name}</a></p>` : ""}`;
 
   view.querySelectorAll("[data-md]").forEach((b) =>
     b.addEventListener("click", () => renderFixtures(Number(b.dataset.md))));
+  document.getElementById("untrackLeague")?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    await api.track({ action: "remove", kind: "league", code: league.code });
+    localStorage.removeItem("league");
+    await loadState();
+    renderLeagueSelect();
+    route();
+  });
 }
 
 // ---- match detail ---------------------------------------------------------
@@ -108,7 +174,7 @@ async function renderMatch(id) {
   view.innerHTML = `
     <a class="back" href="#fixtures">‹ Fixtures</a>
     <div class="detail-card">
-      <div class="detail-head">Matchday ${m.matchday} · ${fmtDay.format(d)} · ${fmtTime.format(d)}${m.referee ? ` · Ref: ${m.referee}` : ""}</div>
+      <div class="detail-head">Matchday ${m.matchday ?? "–"} · ${fmtDay.format(d)} · ${fmtTime.format(d)}${m.referee ? ` · Ref: ${m.referee}` : ""}</div>
       <div class="detail-score">
         <span class="team">${m.home.name} ${crest(m.home)}</span>
         <span class="big">${isPlayed(m.status) ? `${m.home_score}–${m.away_score}` : "vs"}</span>
@@ -124,19 +190,42 @@ async function renderMatch(id) {
 
 // ---- standings ------------------------------------------------------------
 async function renderStandings() {
-  const rows = await api.standings();
+  if (!league) { view.innerHTML = `<p class="muted">No league tracked yet.</p>`; return; }
+  const rows = await api.standings(league.id);
+  if (rows.length === 0) {
+    view.innerHTML = `<h2>Standings</h2><p class="muted">No league table for this competition (yet).</p>`;
+    return;
+  }
   const preseason = rows.every((r) => r.played === 0);
   view.innerHTML = `
     <h2>Standings</h2>
-    ${preseason ? `<p class="muted">Season starts Aug 21 — table resets to zero until then.</p>` : ""}
+    ${preseason ? `<p class="muted">Season hasn't started — the table is all zeros until then. ★ a team to make it your focus.</p>` : ""}
     <div class="table-wrap"><table class="standings">
-      <thead><tr><th>#</th><th class="left">Team</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr></thead>
+      <thead><tr><th></th><th>#</th><th class="left">Team</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr></thead>
       <tbody>${rows.map((r) => `
-        <tr><td>${r.position}</td>
+        <tr><td><button class="star ${favorites.has(r.team.id) ? "on" : ""}" data-team="${r.team.id}" title="Focus team">${favorites.has(r.team.id) ? "★" : "☆"}</button></td>
+        <td>${r.position}</td>
         <td class="left">${crest(r.team)} ${r.team.name}</td>
         <td>${r.played}</td><td>${r.won}</td><td>${r.draw}</td><td>${r.lost}</td>
         <td>${r.goal_diff > 0 ? "+" : ""}${r.goal_diff}</td><td class="pts">${r.points}</td></tr>`).join("")}
       </tbody></table></div>`;
+
+  view.querySelectorAll(".star").forEach((btn) =>
+    btn.addEventListener("click", async () => {
+      const teamId = Number(btn.dataset.team);
+      const isFav = favorites.has(teamId);
+      btn.disabled = true;
+      try {
+        await api.track({ action: isFav ? "remove" : "add", kind: "team", teamId });
+        isFav ? favorites.delete(teamId) : favorites.add(teamId);
+        btn.textContent = isFav ? "☆" : "★";
+        btn.classList.toggle("on", !isFav);
+        renderHero().catch(() => {});
+      } catch (err) {
+        console.error(err);
+      }
+      btn.disabled = false;
+    }));
 }
 
 // ---- router ---------------------------------------------------------------
@@ -156,5 +245,15 @@ async function route() {
 }
 
 window.addEventListener("hashchange", route);
-route();
-renderHero().catch(() => { hero.hidden = true; });
+
+(async () => {
+  try {
+    await loadState();
+  } catch (err) {
+    view.innerHTML = `<p class="muted">Couldn't load data (${err.message}).</p>`;
+    return;
+  }
+  renderLeagueSelect();
+  route();
+  renderHero().catch(() => { hero.hidden = true; });
+})();

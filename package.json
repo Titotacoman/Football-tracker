@@ -1,0 +1,14 @@
+{
+  "name": "soccer-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Soccer league/team tracker — fixtures, match detail, standings. See HANDOFF.md.",
+  "scripts": {
+    "test:af": "node scripts/test-api-football.mjs",
+    "test:fd": "node scripts/test-football-data.mjs",
+    "test:tsdb": "node scripts/test-thesportsdb.mjs",
+    "test:providers": "node scripts/test-api-football.mjs && node scripts/test-football-data.mjs && node scripts/test-thesportsdb.mjs",
+    "poll": "node scripts/poll-fd.mjs"
+  }
+}

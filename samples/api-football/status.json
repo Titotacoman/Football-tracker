@@ -1,0 +1,26 @@
+{
+  "get": "status",
+  "parameters": [],
+  "errors": [],
+  "results": 0,
+  "paging": {
+    "current": 1,
+    "total": 1
+  },
+  "response": {
+    "account": {
+      "firstname": "Jacob",
+      "lastname": "Gonzalez",
+      "email": "Jcglighting25@gmail.com"
+    },
+    "subscription": {
+      "plan": "Free",
+      "end": "2027-07-20T00:00:00+00:00",
+      "active": true
+    },
+    "requests": {
+      "current": 0,
+      "limit_day": 100
+    }
+  }
+}

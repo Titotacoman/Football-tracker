@@ -1,0 +1,7 @@
+[build]
+  publish = "web"
+  # No build step: the SPA is plain static files.
+  command = ""
+
+[functions]
+  directory = "netlify/functions"

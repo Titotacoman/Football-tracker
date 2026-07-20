@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Next Match</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>" />
+  <style>
+    :root { --bg: #0e1117; --text: #e8ecf3; --muted: #8b94a7; --accent: #34d27b; --border: #2a3244; }
+    @media (prefers-color-scheme: light) {
+      :root { --bg: #f4f6fa; --text: #16202e; --muted: #5d6678; --accent: #0c8f4d; --border: #d8deea; }
+    }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: center;
+      background: var(--bg); color: var(--text);
+      font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    .card { text-align: center; padding: 16px 22px; border: 1px solid var(--border); border-radius: 14px; }
+    .label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+    .teams { display: flex; align-items: center; gap: 10px; justify-content: center; margin: 8px 0 4px; font-weight: 700; }
+    .teams img { width: 26px; height: 26px; object-fit: contain; }
+    .vs { color: var(--muted); font-weight: 400; }
+    .when { color: var(--accent); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="card" id="card"><span class="label">Loading…</span></div>
+  <script type="module">
+    import { api } from "./api.js";
+    const card = document.getElementById("card");
+    const fmt = new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+
+    async function refresh() {
+      try {
+        const [next, live] = await Promise.all([api.nextTrackedMatch(), api.anyLive()]);
+        card.innerHTML = next
+          ? `<div class="label">Next · ${next.league}</div>
+             <div class="teams"><span>${next.home_tla}</span><img src="${next.home_crest}" alt="${next.home_team}" />
+             <span class="vs">vs</span>
+             <img src="${next.away_crest}" alt="${next.away_team}" /><span>${next.away_tla}</span></div>
+             <div class="when">${fmt.format(new Date(next.utc_date))}</div>`
+          : `<span class="label">No upcoming tracked match</span>`;
+        // Adaptive refresh per HANDOFF.md: ~1 min while a tracked match is
+        // live, 30 min otherwise.
+        setTimeout(refresh, live ? 60_000 : 1_800_000);
+      } catch {
+        card.innerHTML = `<span class="label">Offline — retrying…</span>`;
+        setTimeout(refresh, 120_000);
+      }
+    }
+    refresh();
+  </script>
+</body>
+</html>

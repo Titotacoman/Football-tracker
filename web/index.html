@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Soccer Tracker</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>⚽ Soccer Tracker</h1>
+    <nav>
+      <a href="#fixtures" data-tab="fixtures">Fixtures</a>
+      <a href="#standings" data-tab="standings">Standings</a>
+    </nav>
+  </header>
+
+  <section id="hero" class="hero" hidden></section>
+
+  <main id="view" aria-live="polite">
+    <p class="muted">Loading…</p>
+  </main>
+
+  <footer class="muted">
+    Data: football-data.org · Premier League 2026-27 · reads served directly from Supabase
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

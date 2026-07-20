@@ -20,8 +20,7 @@ export function loadEnv() {
 export function requireKey(name) {
   const value = process.env[name];
   if (!value) {
-    console.error(`Missing ${name}. Copy .env.example to .env and fill it in.`);
-    process.exit(1);
+    throw new Error(`Missing ${name} — set it in .env (local) or the Netlify env vars (deployed).`);
   }
   return value;
 }

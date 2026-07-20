@@ -50,12 +50,15 @@ export const api = {
       order: "minute.asc",
     }),
 
-  standings: (leagueId) =>
-    rest("standings", {
-      select: "position,played,won,draw,lost,goals_for,goals_against,goal_diff,points,form,team:teams(id,name,tla,crest_url)",
+  // Latest available season's table (standings can lag fixtures preseason).
+  standings: async (leagueId) => {
+    const rows = await rest("standings", {
+      select: "season,position,played,won,draw,lost,goals_for,goals_against,goal_diff,points,form,team:teams(id,name,tla,crest_url)",
       league_id: `eq.${leagueId}`,
-      order: "position.asc,team(name).asc",
-    }),
+      order: "season.desc,position.asc",
+    });
+    return rows.filter((r) => r.season === rows[0]?.season);
+  },
 
   anyLive: async () =>
     (await rest("matches", { select: "id", status: "in.(IN_PLAY,PAUSED)", limit: "1" })).length > 0,

@@ -56,26 +56,41 @@ async function pollLeague(code, headers) {
   }
   const season = seasonYear(matches[0].season);
 
+  // Standings: only league-format tables (exactly one TOTAL table).
+  // Cup group stages would interleave groups into one table — skip those.
+  const standingsData = await fdGet(`/competitions/${code}/standings`, headers);
+  const totals = (standingsData.standings ?? []).filter((s) => s.type === "TOTAL");
+
+  // Teams can appear in standings but not in the fixtures list (or vice
+  // versa) — collect from both so every team_id lookup resolves.
   const fdTeams = new Map();
   for (const m of matches) {
     fdTeams.set(m.homeTeam.id, m.homeTeam);
     fdTeams.set(m.awayTeam.id, m.awayTeam);
   }
+  if (totals.length === 1) for (const row of totals[0].table) fdTeams.set(row.team.id, row.team);
   const teamRows = await db.upsert("teams", [...fdTeams.values()].map(normalizeTeam), "fd_id");
   const teamIds = new Map(teamRows.map((t) => [t.fd_id, t.id]));
 
   await db.upsert("matches", matches.map((m) => normalizeMatch(m, league.id, teamIds)), "fd_id");
 
-  // Standings: only league-format tables (exactly one TOTAL table).
-  // Cup group stages would interleave groups into one table — skip those.
-  const standingsData = await fdGet(`/competitions/${code}/standings`, headers);
-  const totals = (standingsData.standings ?? []).filter((s) => s.type === "TOTAL");
   if (totals.length === 1) {
+    // The standings payload can lag the fixtures (e.g. last season's final
+    // table served preseason) — label it with its own season, not the fixtures'.
+    const standingsSeason = standingsData.season ? seasonYear(standingsData.season) : season;
     await db.upsert(
       "standings",
-      totals[0].table.map((row) => normalizeStandingRow(row, league.id, season, teamIds)),
+      totals[0].table.map((row) => normalizeStandingRow(row, league.id, standingsSeason, teamIds)),
       "league_id,season,team_id",
     );
+    // Sweep rows for teams no longer in this season's table (relegation,
+    // or the provider swapping from last season's placeholder table).
+    const currentIds = totals[0].table.map((row) => teamIds.get(row.team.id));
+    await db.delete("standings", {
+      league_id: `eq.${league.id}`,
+      season: `eq.${standingsSeason}`,
+      team_id: `not.in.(${currentIds.join(",")})`,
+    });
   }
 
   await markSync(`fd:${code}`, true);

@@ -10,7 +10,8 @@
 import { requireKey, getJson } from "./util.mjs";
 import { db } from "./supabase.mjs";
 import { seasonYear, normalizeTeam, normalizeMatch, normalizeStandingRow } from "./normalize-fd.mjs";
-import { leagueByCode } from "./leagues.mjs";
+import { normalizeEspnTeam, normalizeEspnMatch, normalizeEspnStandingRow } from "./normalize-espn.mjs";
+import { leagueByCode, leagueDbRow } from "./leagues.mjs";
 
 const BASE = "https://api.football-data.org/v4";
 const MAX_LEAGUES_PER_RUN = 3;
@@ -40,11 +41,11 @@ async function markSync(job, ok, note = null) {
 export async function ensureLeague(code) {
   const reg = leagueByCode(code);
   if (!reg) throw new Error(`Unsupported league code: ${code}`);
-  const [row] = await db.upsert("leagues", [reg], "code");
+  const [row] = await db.upsert("leagues", [leagueDbRow(reg)], "code");
   return row;
 }
 
-async function pollLeague(code, headers) {
+async function pollFdLeague(code, headers) {
   const league = await ensureLeague(code);
 
   const matchData = await fdGet(`/competitions/${code}/matches`, headers);
@@ -97,6 +98,80 @@ async function pollLeague(code, headers) {
   console.log(`${code}: ${matches.length} matches, ${teamRows.length} teams, season ${season}`);
 }
 
+// ---- ESPN provider (public JSON API, no key) ------------------------------
+const ESPN_SITE = "https://site.api.espn.com/apis/site/v2/sports/soccer";
+const ESPN_V2 = "https://site.api.espn.com/apis/v2/sports/soccer";
+const yyyymmdd = (d) => d.toISOString().slice(0, 10).replaceAll("-", "");
+
+async function espnGet(url) {
+  const res = await getJson(url);
+  if (res.status !== 200) {
+    throw new Error(`espn ${url.slice(ESPN_SITE.length)} -> HTTP ${res.status}`);
+  }
+  return res.body;
+}
+
+async function pollEspnLeague(code) {
+  const reg = leagueByCode(code);
+  const league = await ensureLeague(code);
+
+  // Rolling season window: past 4 months + next ~7.5 covers calendar-year
+  // leagues (MLS), cross-year leagues (Liga MX), and tournaments. ESPN
+  // rejects ranges longer than ~a year, so keep the window under 12 months.
+  const from = yyyymmdd(new Date(Date.now() - 120 * 86400_000));
+  const to = yyyymmdd(new Date(Date.now() + 230 * 86400_000));
+  const board = await espnGet(`${ESPN_SITE}/${reg.espn_slug}/scoreboard?dates=${from}-${to}&limit=1000`);
+  const events = (board.events ?? []).filter((e) => e.competitions?.[0]?.competitors?.length === 2);
+  if (events.length === 0) {
+    console.log(`${code}: no events in window`);
+    await markSync(`fd:${code}`, true, "no events");
+    return;
+  }
+
+  const espnTeams = new Map();
+  for (const e of events) {
+    for (const c of e.competitions[0].competitors) espnTeams.set(Number(c.team.id), c.team);
+  }
+  const teamRows = await db.upsert("teams", [...espnTeams.values()].map(normalizeEspnTeam), "espn_id");
+  const teamIds = new Map(teamRows.map((t) => [t.espn_id, t.id]));
+
+  await db.upsert("matches", events.map((e) => normalizeEspnMatch(e, league.id, teamIds)), "espn_id");
+
+  // Standings (leagues only — tournaments 404 or return empty).
+  try {
+    const table = await espnGet(`${ESPN_V2}/${reg.espn_slug}/standings`);
+    const groups = (table.children ?? []).filter((c) => c.standings?.entries?.length);
+    const multi = groups.length > 1;
+    const season = table.seasons?.[0]?.year ?? events[0].season?.year ?? new Date().getFullYear();
+    const rows = groups.flatMap((g) =>
+      g.standings.entries
+        .filter((e) => teamIds.has(Number(e.team.id)))
+        .map((e, i) => normalizeEspnStandingRow(e, league.id, season, teamIds, multi ? g.name : null, i + 1)),
+    );
+    if (rows.length) {
+      await db.upsert("standings", rows, "league_id,season,team_id");
+      const currentIds = rows.map((r) => r.team_id);
+      await db.delete("standings", {
+        league_id: `eq.${league.id}`,
+        season: `eq.${season}`,
+        team_id: `not.in.(${currentIds.join(",")})`,
+      });
+    }
+  } catch {
+    console.log(`${code}: no standings available`);
+  }
+
+  await markSync(`fd:${code}`, true);
+  console.log(`${code}: ${events.length} matches, ${teamRows.length} teams (espn)`);
+}
+
+function pollLeague(code) {
+  const reg = leagueByCode(code);
+  return reg.provider === "espn"
+    ? pollEspnLeague(code)
+    : pollFdLeague(code, { "X-Auth-Token": requireKey("FOOTBALL_DATA_KEY") });
+}
+
 async function pickRotation(trackedCodes, leagueIdsByCode) {
   const sync = await db.select("sync_state", { select: "job,last_ok" });
   const lastOk = new Map(sync.map((s) => [s.job, s.last_ok]));
@@ -124,8 +199,6 @@ async function pickRotation(trackedCodes, leagueIdsByCode) {
 // codes: poll exactly these leagues (used by the track function).
 // Otherwise: rotate over tracked leagues.
 export async function runPoll({ codes } = {}) {
-  const headers = { "X-Auth-Token": requireKey("FOOTBALL_DATA_KEY") };
-
   let targets = codes;
   if (!targets) {
     const selections = await db.select("user_selections", {
@@ -146,7 +219,7 @@ export async function runPoll({ codes } = {}) {
   const results = {};
   for (const code of targets) {
     try {
-      await pollLeague(code, headers);
+      await pollLeague(code);
       results[code] = "ok";
     } catch (err) {
       console.error(`${code}: ${err.message}`);

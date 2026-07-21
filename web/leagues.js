@@ -13,4 +13,8 @@ export const SUPPORTED_LEAGUES = [
   { code: "CL",  name: "Champions League" },
   { code: "EC",  name: "European Championship" },
   { code: "WC",  name: "World Cup" },
+  { code: "LMX", name: "Liga MX" },
+  { code: "MLS", name: "MLS" },
+  { code: "GC",  name: "Gold Cup" },
+  { code: "CA",  name: "Copa América" },
 ];

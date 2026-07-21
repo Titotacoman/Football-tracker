@@ -43,6 +43,34 @@ nav a.active { color: var(--accent); }
 }
 
 .match.fav { border-left: 3px solid var(--accent); }
+.seg {
+  background: var(--surface-2); color: var(--muted); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 16px; font-weight: 600; cursor: pointer;
+}
+.seg.on { color: var(--accent); border-color: var(--accent); }
+
+.team-link { color: var(--text); text-decoration: none; }
+.team-link:hover { color: var(--accent); }
+
+.team-head { display: flex; align-items: center; gap: 16px; margin: 8px 0 18px; }
+.team-head h2 { margin: 0 0 2px; }
+.crest.xl { width: 56px; height: 56px; }
+.roster { list-style: none; padding: 0; margin: 0 0 10px; columns: 2; }
+.roster li { padding: 3px 0; break-inside: avoid; }
+.shirt { display: inline-block; min-width: 26px; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; margin-right: 6px; }
+
+.league-list { list-style: none; padding: 0; margin: 0 0 18px; }
+.league-list li {
+  display: flex; justify-content: space-between; align-items: center;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 9px 14px; margin-bottom: 6px;
+}
+.chip {
+  background: var(--surface-2); color: var(--accent); border: 1px solid var(--border);
+  border-radius: 8px; padding: 4px 12px; font-weight: 600; cursor: pointer;
+}
+.chip.danger { color: var(--live); }
+.chip:disabled { opacity: .4; cursor: default; }
 .star {
   background: none; border: none; cursor: pointer;
   color: var(--muted); font-size: 16px; padding: 0 2px;

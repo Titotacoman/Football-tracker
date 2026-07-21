@@ -53,11 +53,60 @@ export const api = {
   // Latest available season's table (standings can lag fixtures preseason).
   standings: async (leagueId) => {
     const rows = await rest("standings", {
-      select: "season,position,played,won,draw,lost,goals_for,goals_against,goal_diff,points,form,team:teams(id,name,tla,crest_url)",
+      select: "season,grp,position,played,won,draw,lost,goals_for,goals_against,goal_diff,points,form,team:teams(id,name,tla,crest_url)",
       league_id: `eq.${leagueId}`,
-      order: "season.desc,position.asc",
+      order: "season.desc,grp.asc.nullsfirst,position.asc",
     });
     return rows.filter((r) => r.season === rows[0]?.season);
+  },
+
+  // Date-mode fixtures for competitions without matchday numbers.
+  upcoming: (leagueId, limit = 25) =>
+    rest("matches", {
+      select: MATCH_COLS,
+      league_id: `eq.${leagueId}`,
+      status: "in.(SCHEDULED,TIMED,IN_PLAY,PAUSED)",
+      utc_date: `gte.${new Date(Date.now() - 12 * 3600_000).toISOString()}`,
+      order: "utc_date.asc",
+      limit: String(limit),
+    }),
+
+  results: (leagueId, limit = 25) =>
+    rest("matches", {
+      select: MATCH_COLS,
+      league_id: `eq.${leagueId}`,
+      status: "eq.FINISHED",
+      order: "utc_date.desc",
+      limit: String(limit),
+    }),
+
+  team: async (id) =>
+    (await rest("teams", { id: `eq.${id}`, select: "id,name,short_name,tla,crest_url,stadium" }))[0],
+
+  teamPlayers: (teamId) =>
+    rest("players", {
+      select: "id,name,position,shirt_number",
+      team_id: `eq.${teamId}`,
+      order: "name.asc",
+    }),
+
+  teamMatches: (teamId, leagueId) =>
+    rest("matches", {
+      select: MATCH_COLS,
+      league_id: `eq.${leagueId}`,
+      or: `(home_team_id.eq.${teamId},away_team_id.eq.${teamId})`,
+      order: "utc_date.asc",
+    }),
+
+  fetchRoster: async (teamId, leagueCode) => {
+    const res = await fetch(`${FUNCTIONS_BASE}/roster`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teamId, league: leagueCode }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error ?? `roster: HTTP ${res.status}`);
+    return body;
   },
 
   anyLive: async () =>

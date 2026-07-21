@@ -112,6 +112,44 @@ export const api = {
   anyLive: async () =>
     (await rest("matches", { select: "id", status: "in.(IN_PLAY,PAUSED)", limit: "1" })).length > 0,
 
+  // A live match among the given leagues, if any (for the hero).
+  liveMatch: async (leagueIds) =>
+    (await rest("matches", {
+      select: `${MATCH_COLS},league:leagues(name)`,
+      status: "in.(IN_PLAY,PAUSED)",
+      league_id: `in.(${leagueIds.join(",")})`,
+      order: "utc_date.asc",
+      limit: "1",
+    }))[0] ?? null,
+
+  // Last n finished meetings between two teams (any tracked data).
+  headToHead: (a, b, n = 5) =>
+    rest("matches", {
+      select: MATCH_COLS,
+      or: `(and(home_team_id.eq.${a},away_team_id.eq.${b}),and(home_team_id.eq.${b},away_team_id.eq.${a}))`,
+      status: "eq.FINISHED",
+      order: "utc_date.desc",
+      limit: String(n),
+    }),
+
+  // Last n finished matches for one team -> W/D/L form, newest first.
+  teamForm: async (teamId, n = 5) => {
+    const ms = await rest("matches", {
+      select: "home_team_id,away_team_id,winner",
+      or: `(home_team_id.eq.${teamId},away_team_id.eq.${teamId})`,
+      status: "eq.FINISHED",
+      order: "utc_date.desc",
+      limit: String(n),
+    });
+    return ms.map((m) =>
+      m.winner === "DRAW" ? "D"
+      : (m.winner === "HOME_TEAM") === (m.home_team_id === teamId) ? "W" : "L");
+  },
+
+  // Newest successful sync -> data-freshness indicator.
+  lastSync: async () =>
+    (await rest("sync_state", { select: "last_ok", order: "last_ok.desc.nullslast", limit: "1" }))[0]?.last_ok ?? null,
+
   // Writes — via the track function.
   track: async (payload) => {
     const res = await fetch(`${FUNCTIONS_BASE}/track`, {

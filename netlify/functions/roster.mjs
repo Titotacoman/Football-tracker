@@ -78,9 +78,15 @@ export default async (req) => {
       await db.update("teams", { id: `eq.${team.id}` }, { espn_id: espnId });
     }
 
-    const res = await getJson(`${ESPN_SITE}/${reg.espn_slug}/teams/${espnId}/roster`);
+    let res = await getJson(`${ESPN_SITE}/${reg.espn_slug}/teams/${espnId}/roster`);
     if (res.status !== 200) throw new Error(`espn roster -> HTTP ${res.status}`);
-    const athletes = res.body.athletes ?? [];
+    let athletes = res.body.athletes ?? [];
+    // Early in a season ESPN's default (new) season has no roster yet —
+    // fall back to the previous season's squad.
+    if (athletes.length === 0 && res.body.season?.year) {
+      res = await getJson(`${ESPN_SITE}/${reg.espn_slug}/teams/${espnId}/roster?season=${res.body.season.year - 1}`);
+      if (res.status === 200) athletes = res.body.athletes ?? [];
+    }
     if (athletes.length) {
       await db.upsert(
         "players",
@@ -102,8 +108,14 @@ export default async (req) => {
       );
     }
 
+    // Only cache success when we actually got players, so empty upstream
+    // data is retried on the next visit instead of stuck for 24h.
     const now = new Date().toISOString();
-    await db.upsert("sync_state", [{ job, last_run: now, last_ok: now, note: `${athletes.length} players` }], "job");
+    await db.upsert(
+      "sync_state",
+      [{ job, last_run: now, ...(athletes.length ? { last_ok: now } : {}), note: `${athletes.length} players` }],
+      "job",
+    );
     return json(200, { ok: true, players: athletes.length });
   } catch (err) {
     return json(500, { error: err.message });

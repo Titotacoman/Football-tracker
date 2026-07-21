@@ -20,6 +20,17 @@ const STATUS_MAP = {
   STATUS_ABANDONED: "SUSPENDED",
 };
 
+// US broadcast/streaming names from an ESPN competition's geoBroadcasts.
+// Prefer National listings; dedupe; cap at 3. Returns null if none.
+export function espnBroadcast(comp) {
+  const geos = comp?.geoBroadcasts ?? [];
+  if (!geos.length) return null;
+  const national = geos.filter((g) => g.market?.type === "National");
+  const pool = national.length ? national : geos;
+  const names = [...new Set(pool.map((g) => g.media?.shortName).filter(Boolean))];
+  return names.length ? names.slice(0, 3).join(" / ") : null;
+}
+
 export function normalizeEspnTeam(t) {
   return {
     name: t.displayName,
@@ -53,6 +64,7 @@ export function normalizeEspnMatch(event, leagueId, teamIds) {
       : Number(home.score) > Number(away.score) ? "HOME_TEAM"
       : Number(away.score) > Number(home.score) ? "AWAY_TEAM"
       : "DRAW",
+    broadcast: espnBroadcast(comp),
     espn_id: Number(event.id),
     last_updated: new Date().toISOString(),
   };

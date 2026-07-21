@@ -12,7 +12,7 @@ async function rest(path, params = {}) {
 }
 
 const TEAM_COLS = "id,name,short_name,tla,crest_url";
-const MATCH_COLS = `id,utc_date,status,matchday,home_score,away_score,home_score_ht,away_score_ht,winner,referee,detail_status,
+const MATCH_COLS = `id,utc_date,status,matchday,home_score,away_score,home_score_ht,away_score_ht,winner,referee,detail_status,broadcast,
   home:teams!matches_home_team_id_fkey(${TEAM_COLS}),
   away:teams!matches_away_team_id_fkey(${TEAM_COLS})`.replace(/\s+/g, "");
 

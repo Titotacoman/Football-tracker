@@ -178,7 +178,24 @@ nav a.active { color: var(--accent); background: var(--accent-dim); }
 .events li { padding: 5px 0; }
 .minute { display: inline-block; min-width: 36px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
-.form-row { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 14px; font-size: 13px; color: var(--muted); }
+.form-caption { text-align: center; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-top: 16px; }
+.form-row { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 6px; font-size: 13px; color: var(--muted); cursor: help; }
+
+/* where-to-watch */
+.watch { margin-top: 12px; font-size: 13px; font-weight: 600; color: var(--blue); cursor: help; }
+.watch .tv { margin-right: 4px; }
+.watch-mini { grid-column: 1 / -1; text-align: center; font-size: 11px; color: var(--blue); margin-top: 2px; }
+
+/* tap-to-explain popover */
+[data-explain] { cursor: help; }
+.standings th[data-explain] { text-decoration: underline dotted; text-underline-offset: 3px; }
+.explain-pop {
+  position: fixed; z-index: 50; display: none; max-width: 240px;
+  background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 9px 12px; font-size: 12.5px; line-height: 1.45; font-weight: 500;
+  box-shadow: var(--shadow);
+}
 .pill {
   display: inline-flex; align-items: center; justify-content: center;
   width: 22px; height: 22px; border-radius: 7px;

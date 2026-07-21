@@ -7,10 +7,10 @@
 // leagues, at most MAX_LEAGUES_PER_RUN per tick to stay inside both the
 // 10 req/min football-data cap and the function timeout. Leagues with a
 // match in a ±3h window jump the queue; ties broken by stalest sync.
-import { requireKey, getJson } from "./util.mjs";
+import { requireKey, getJson, nameKey } from "./util.mjs";
 import { db } from "./supabase.mjs";
 import { seasonYear, normalizeTeam, normalizeMatch, normalizeStandingRow } from "./normalize-fd.mjs";
-import { normalizeEspnTeam, normalizeEspnMatch, normalizeEspnStandingRow } from "./normalize-espn.mjs";
+import { normalizeEspnTeam, normalizeEspnMatch, normalizeEspnStandingRow, espnBroadcast } from "./normalize-espn.mjs";
 import { leagueByCode, leagueDbRow } from "./leagues.mjs";
 
 const BASE = "https://api.football-data.org/v4";
@@ -94,6 +94,14 @@ async function pollFdLeague(code, headers) {
     });
   }
 
+  // Best-effort: attach US broadcast listings from ESPN for near-term games.
+  // football-data has none; ESPN only fills them in as kickoff nears.
+  try {
+    await attachFdBroadcasts(league, code);
+  } catch (err) {
+    console.log(`${code}: broadcast enrichment skipped (${err.message})`);
+  }
+
   await markSync(`fd:${code}`, true);
   console.log(`${code}: ${matches.length} matches, ${teamRows.length} teams, season ${season}`);
 }
@@ -109,6 +117,57 @@ async function espnGet(url) {
     throw new Error(`espn ${url.slice(ESPN_SITE.length)} -> HTTP ${res.status}`);
   }
   return res.body;
+}
+
+const dayOf = (iso) => iso.slice(0, 10);
+const wordsOf = (name) => new Set(nameKey(name).split(" ").filter((w) => w.length > 2));
+const shareWord = (a, b) => [...a].some((w) => b.has(w));
+
+// Attach ESPN broadcast listings to a football-data league's near-term
+// matches by pairing on date + both team names (providers differ on ids).
+async function attachFdBroadcasts(league, code) {
+  const reg = leagueByCode(code);
+  if (!reg.espn_slug) return;
+  const from = yyyymmdd(new Date(Date.now() - 2 * 86400_000));
+  const to = yyyymmdd(new Date(Date.now() + 9 * 86400_000));
+  const board = await espnGet(`${ESPN_SITE}/${reg.espn_slug}/scoreboard?dates=${from}-${to}&limit=200`);
+
+  const espnGames = [];
+  for (const e of board.events ?? []) {
+    const comp = e.competitions?.[0];
+    const b = espnBroadcast(comp);
+    if (!b || comp.competitors?.length !== 2) continue;
+    espnGames.push({
+      day: dayOf(e.date),
+      sides: comp.competitors.map((c) => wordsOf(c.team.displayName)),
+      broadcast: b,
+    });
+  }
+  if (espnGames.length === 0) return;
+
+  const dbMatches = await db.select("matches", {
+    select: "id,utc_date,broadcast,home:teams!matches_home_team_id_fkey(name),away:teams!matches_away_team_id_fkey(name)",
+    league_id: `eq.${league.id}`,
+    utc_date: `gte.${new Date(Date.now() - 2 * 86400_000).toISOString()}`,
+  });
+
+  const updates = [];
+  for (const m of dbMatches) {
+    const day = dayOf(m.utc_date);
+    const h = wordsOf(m.home.name), a = wordsOf(m.away.name);
+    const hits = espnGames.filter((g) =>
+      g.day === day &&
+      ((shareWord(h, g.sides[0]) && shareWord(a, g.sides[1])) ||
+       (shareWord(h, g.sides[1]) && shareWord(a, g.sides[0]))));
+    // Only accept an unambiguous single match.
+    if (hits.length === 1 && hits[0].broadcast !== m.broadcast) {
+      updates.push({ id: m.id, broadcast: hits[0].broadcast });
+    }
+  }
+  if (updates.length) {
+    await db.upsert("matches", updates, "id");
+    console.log(`${code}: broadcast attached to ${updates.length} match(es)`);
+  }
 }
 
 async function pollEspnLeague(code) {

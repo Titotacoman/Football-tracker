@@ -14,6 +14,10 @@ const STATUS_LABEL = {
   SCHEDULED: "", TIMED: "", IN_PLAY: "LIVE", PAUSED: "HT",
   FINISHED: "FT", POSTPONED: "PPD", SUSPENDED: "SUSP", CANCELLED: "CANC",
 };
+const BADGE_EXPLAIN = {
+  IN_PLAY: "Live — match in progress", PAUSED: "Half time", FINISHED: "Full time — match finished",
+  POSTPONED: "Postponed", SUSPENDED: "Suspended", CANCELLED: "Cancelled",
+};
 const isPlayed = (s) => ["IN_PLAY", "PAUSED", "FINISHED"].includes(s);
 
 // "Today" / "Tomorrow" instead of raw dates where it helps.
@@ -84,6 +88,7 @@ function matchRow(m) {
     ${scoreOrTime(m)}
     <span class="team away">${crest(m.away)} ${m.away.short_name ?? m.away.name}${favorites.has(m.away.id) ? " ★" : ""}</span>
     ${badge ? `<span class="badge ${m.status}">${badge}</span>` : ""}
+    ${m.broadcast && !isPlayed(m.status) ? `<span class="watch-mini">📺 ${m.broadcast}</span>` : ""}
   </a>`;
 }
 
@@ -99,7 +104,37 @@ function matchList(matches) {
 }
 
 const formPills = (form) =>
-  form.map((r) => `<span class="pill ${r}">${r}</span>`).join("");
+  form.map((r) => `<span class="pill ${r}" title="${{ W: "Win", D: "Draw", L: "Loss" }[r]}">${r}</span>`).join("");
+
+const FORM_EXPLAIN = "Recent form: each team's last 5 results, newest first. Green = win, grey = draw, red = loss.";
+
+// ---- tap-to-explain popover ----------------------------------------------
+// Any element with data-explain shows its text on tap/click (mobile-friendly).
+let explainPop;
+function showExplain(target) {
+  if (!explainPop) {
+    explainPop = document.createElement("div");
+    explainPop.className = "explain-pop";
+    document.body.appendChild(explainPop);
+  }
+  explainPop.textContent = target.getAttribute("data-explain");
+  explainPop.style.display = "block";
+  explainPop.style.left = "0px"; explainPop.style.top = "0px"; // measure first
+  const r = target.getBoundingClientRect();
+  const pw = explainPop.offsetWidth, ph = explainPop.offsetHeight;
+  let left = r.left + r.width / 2 - pw / 2;
+  left = Math.max(8, Math.min(left, window.innerWidth - pw - 8));
+  let top = r.bottom + 6;
+  if (top + ph > window.innerHeight - 8) top = r.top - ph - 6;
+  explainPop.style.left = `${left}px`;
+  explainPop.style.top = `${Math.max(8, top)}px`;
+}
+function hideExplain() { if (explainPop) explainPop.style.display = "none"; }
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-explain]");
+  if (t) { e.preventDefault(); showExplain(t); } else hideExplain();
+});
+document.addEventListener("scroll", hideExplain, true);
 
 function starButton(teamId, cls = "star") {
   const on = favorites.has(teamId);
@@ -249,7 +284,8 @@ async function renderMatch(id) {
         <span class="team">${crest(m.away)} <a class="team-link" href="#team/${m.away.id}">${m.away.name}</a></span>
       </div>
       ${m.status === "FINISHED" && m.home_score_ht != null ? `<div class="muted center">HT ${m.home_score_ht}–${m.away_score_ht}</div>` : ""}
-      ${STATUS_LABEL[m.status] ? `<div class="center"><span class="badge ${m.status}">${STATUS_LABEL[m.status]}</span></div>` : ""}
+      ${STATUS_LABEL[m.status] ? `<div class="center"><span class="badge ${m.status}" data-explain="${BADGE_EXPLAIN[m.status] ?? ""}">${STATUS_LABEL[m.status]}</span></div>` : ""}
+      ${m.broadcast && !isPlayed(m.status) ? `<div class="watch center" data-explain="Where this match is shown in the US (from ESPN listings, added as kickoff nears)."><span class="tv">📺</span> ${m.broadcast}</div>` : ""}
       <div id="matchForm"></div>
       ${events.length ? `<ul class="events">${events.map((e) => `
         <li><span class="minute">${e.minute ?? ""}′</span> ${EVENT_ICON[e.type] ?? e.type}
@@ -261,7 +297,8 @@ async function renderMatch(id) {
   Promise.all([api.teamForm(m.home.id), api.teamForm(m.away.id)]).then(([hf, af]) => {
     if (!hf.length && !af.length) return;
     document.getElementById("matchForm").innerHTML = `
-      <div class="form-row">
+      <div class="form-caption">Recent form (last 5) · tap to explain</div>
+      <div class="form-row" data-explain="${FORM_EXPLAIN}">
         <span>${m.home.tla ?? ""}</span> ${formPills(hf) || "–"}
         <span style="margin: 0 8px">·</span>
         ${formPills(af) || "–"} <span>${m.away.tla ?? ""}</span>
@@ -379,17 +416,27 @@ async function renderStandings() {
     (groups.get(r.grp) ?? groups.set(r.grp, []).get(r.grp)).push(r);
   }
   const zones = groups.size === 1 && !preseason ? ZONES[league.code] : null;
+  const ZH = {
+    P: "Matches played", W: "Matches won", D: "Matches drawn",
+    L: "Matches lost", GD: "Goal difference (goals for − against)", Pts: "Points (3 for a win, 1 for a draw)",
+  };
+  const th = (k) => `<th data-explain="${ZH[k]}">${k}</th>`;
+  const zoneExplain = (z) =>
+    z === "ucl" ? "Champions League qualification" : z === "uel" ? "Europa League qualification"
+    : z === "rel" ? "Relegation zone" : "";
   const tableFor = (list) => `
     <div class="table-wrap"><table class="standings">
-      <thead><tr><th></th><th></th><th>#</th><th class="left">Team</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr></thead>
-      <tbody>${list.map((r) => `
-        <tr class="${favorites.has(r.team.id) ? "fav" : ""}">
-        <td class="zone"><span class="zone-bar ${zoneFor(r.position, list.length, zones)}"></span></td>
+      <thead><tr><th></th><th></th><th>#</th><th class="left">Team</th>${["P","W","D","L","GD","Pts"].map(th).join("")}</tr></thead>
+      <tbody>${list.map((r) => {
+        const z = zoneFor(r.position, list.length, zones);
+        return `<tr class="${favorites.has(r.team.id) ? "fav" : ""}">
+        <td class="zone">${z ? `<span class="zone-bar ${z}" data-explain="${zoneExplain(z)}"></span>` : `<span class="zone-bar"></span>`}</td>
         <td>${starButton(r.team.id)}</td>
         <td>${r.position}</td>
         <td class="left"><a class="team-link" href="#team/${r.team.id}">${crest(r.team)} ${r.team.name}</a></td>
         <td>${r.played}</td><td>${r.won}</td><td>${r.draw}</td><td>${r.lost}</td>
-        <td>${r.goal_diff > 0 ? "+" : ""}${r.goal_diff}</td><td class="pts">${r.points}</td></tr>`).join("")}
+        <td>${r.goal_diff > 0 ? "+" : ""}${r.goal_diff}</td><td class="pts">${r.points}</td></tr>`;
+      }).join("")}
       </tbody></table></div>`;
   view.innerHTML = `
     <h2>Standings</h2>

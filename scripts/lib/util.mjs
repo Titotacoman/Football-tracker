@@ -35,6 +35,18 @@ export function saveSample(provider, name, data) {
   console.log(`  saved samples/${provider}/${name}.json`);
 }
 
+// Normalize a club name for cross-provider matching: lowercase, strip
+// accents and common affixes (FC, AFC, CF, ...), keep significant words.
+export function nameKey(s) {
+  return (s || "")
+    .toLowerCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/\b(fc|afc|cf|sc|ac|cd|ud|club|de|deportivo|real|cp|rc)\b/g, "")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export async function getJson(url, headers = {}) {
   const res = await fetch(url, { headers });
   const body = await res.json().catch(() => null);

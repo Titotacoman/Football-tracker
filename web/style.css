@@ -40,20 +40,21 @@ body {
   font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
   background: var(--bg);
   color: var(--text);
+  overflow-x: clip; /* backstop: never let a stray wide child scroll the page sideways */
 }
 
 /* ---- header ---- */
 .topbar {
   position: sticky; top: 0; z-index: 10;
-  display: flex; align-items: center; gap: 14px;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px;
   padding: 14px 16px;
   margin: 0 -16px 14px;
   background: color-mix(in srgb, var(--bg) 82%, transparent);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border);
 }
-.topbar h1 { font-size: 18px; margin: 0; letter-spacing: -.01em; white-space: nowrap; }
-nav { margin-left: auto; display: flex; gap: 4px; }
+.topbar h1 { font-size: 18px; margin: 0; letter-spacing: -.01em; white-space: nowrap; flex: 0 0 auto; }
+nav { margin-left: auto; display: flex; gap: 4px; flex: 0 0 auto; }
 nav a {
   color: var(--muted); text-decoration: none; font-weight: 600; font-size: 14px;
   padding: 6px 12px; border-radius: 8px;
@@ -64,7 +65,8 @@ nav a.active { color: var(--accent); background: var(--accent-dim); }
 #leagueSel {
   background: var(--surface-2); color: var(--text);
   border: 1px solid var(--border); border-radius: 9px;
-  padding: 7px 10px; font-weight: 600; font-size: 14px; max-width: 175px;
+  padding: 7px 10px; font-weight: 600; font-size: 14px;
+  flex: 1 1 auto; min-width: 0; max-width: 200px;
   cursor: pointer;
 }
 
@@ -263,3 +265,32 @@ h2 { font-size: 20px; letter-spacing: -.01em; }
 .muted { color: var(--muted); }
 footer { margin-top: 44px; font-size: 12px; text-align: center; color: var(--muted); }
 #freshness { font-variant-numeric: tabular-nums; }
+
+/* ---- mobile ---- */
+@media (max-width: 600px) {
+  body { font-size: 14px; }
+  /* Header reflows to two rows: title + nav on top, full-width league picker below. */
+  .topbar { gap: 10px 12px; padding: 12px 16px; }
+  .topbar h1 { order: 1; font-size: 17px; }
+  nav { order: 2; margin-left: auto; }
+  #leagueSel { order: 3; flex: 1 1 100%; max-width: none; }
+  /* Sticky day headers clear the now-taller two-row header. */
+  .day { top: 104px; }
+
+  /* Fixture rows: keep names from squeezing the score off-screen. */
+  .match { padding: 10px 12px; gap: 8px; }
+  .team { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+  /* Standings: drop W/D/L so the essential columns fit without sideways scroll. */
+  .standings th:nth-child(6), .standings td:nth-child(6),
+  .standings th:nth-child(7), .standings td:nth-child(7),
+  .standings th:nth-child(8), .standings td:nth-child(8) { display: none; }
+  .standings th, .standings td { padding: 9px 7px; }
+  /* Truncate long club names so the remaining columns always fit. */
+  .standings td.left { max-width: 150px; }
+  .standings td.left a { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .hero-teams { font-size: 16px; }
+  .detail-score { font-size: 15px; gap: 8px; }
+  .big { font-size: 28px; }
+}

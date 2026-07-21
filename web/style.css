@@ -111,6 +111,8 @@ nav a.active { color: var(--accent); background: var(--accent-dim); }
 .md-nav button:hover:not(:disabled), .md-nav select:hover { border-color: var(--accent); }
 .md-nav button:disabled { opacity: .3; cursor: default; }
 .md-nav select { font-weight: 700; padding: 0 10px; text-align: center; }
+/* Only the ‹ › arrows are fixed-width; the Upcoming/Results segments size to their labels. */
+.md-nav .seg { width: auto; }
 
 .seg {
   background: var(--surface); color: var(--muted); border: 1px solid var(--border);

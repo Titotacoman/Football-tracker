@@ -254,8 +254,8 @@ async function renderTeam(id) {
     const key = p.position ?? "Other";
     (groups.get(key) ?? groups.set(key, []).get(key)).push(p);
   }
-  const ordered = [...groups.keys()].sort(
-    (a, b) => (POSITION_ORDER.indexOf(a) + 99) % 100 - (POSITION_ORDER.indexOf(b) + 99) % 100 || a.localeCompare(b));
+  const posRank = (p) => { const i = POSITION_ORDER.indexOf(p); return i === -1 ? 98 : i; };
+  const ordered = [...groups.keys()].sort((a, b) => posRank(a) - posRank(b) || a.localeCompare(b));
   rosterEl.innerHTML = ordered.map((pos) => `
     <h4 class="day">${pos}s</h4>
     <ul class="roster">${groups.get(pos)

@@ -19,6 +19,8 @@ const BADGE_EXPLAIN = {
   POSTPONED: "Postponed", SUSPENDED: "Suspended", CANCELLED: "Cancelled",
 };
 const isPlayed = (s) => ["IN_PLAY", "PAUSED", "FINISHED"].includes(s);
+// Show "where to watch" up to and during a match, but not once it's over/off.
+const showWatch = (s) => !["FINISHED", "POSTPONED", "CANCELLED", "SUSPENDED"].includes(s);
 
 // "Today" / "Tomorrow" instead of raw dates where it helps.
 function dayLabel(date) {
@@ -88,7 +90,7 @@ function matchRow(m) {
     ${scoreOrTime(m)}
     <span class="team away">${crest(m.away)} ${m.away.short_name ?? m.away.name}${favorites.has(m.away.id) ? " ★" : ""}</span>
     ${badge ? `<span class="badge ${m.status}">${badge}</span>` : ""}
-    ${m.broadcast && !isPlayed(m.status) ? `<span class="watch-mini">📺 ${m.broadcast}</span>` : ""}
+    ${m.broadcast && showWatch(m.status) ? `<span class="watch-mini">📺 ${m.broadcast}</span>` : ""}
   </a>`;
 }
 
@@ -285,7 +287,7 @@ async function renderMatch(id) {
       </div>
       ${m.status === "FINISHED" && m.home_score_ht != null ? `<div class="muted center">HT ${m.home_score_ht}–${m.away_score_ht}</div>` : ""}
       ${STATUS_LABEL[m.status] ? `<div class="center"><span class="badge ${m.status}" data-explain="${BADGE_EXPLAIN[m.status] ?? ""}">${STATUS_LABEL[m.status]}</span></div>` : ""}
-      ${m.broadcast && !isPlayed(m.status) ? `<div class="watch center" data-explain="Where this match is shown in the US (from ESPN listings, added as kickoff nears)."><span class="tv">📺</span> ${m.broadcast}</div>` : ""}
+      ${m.broadcast && showWatch(m.status) ? `<div class="watch center" data-explain="Where this match is shown in the US (from ESPN listings, added as kickoff nears)."><span class="tv">📺</span> ${m.broadcast}</div>` : ""}
       <div id="matchForm"></div>
       ${events.length ? `<ul class="events">${events.map((e) => `
         <li><span class="minute">${e.minute ?? ""}′</span> ${EVENT_ICON[e.type] ?? e.type}

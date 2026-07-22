@@ -3,12 +3,14 @@
 // (e.g. Liga MX on ViX/TUDN). Settled/published facts only — never live
 // in-match data.
 //
-// Model is configurable via ANTHROPIC_MODEL (default claude-opus-4-8). Uses
-// the web_search server tool. This is the only paid component in the project.
+// Model is configurable via ANTHROPIC_MODEL. Default is claude-sonnet-5:
+// near-Opus reasoning for weighing conflicting broadcast sources, at a
+// fraction of Opus cost. Uses the web_search server tool. This is the only
+// paid component in the project.
 import Anthropic from "@anthropic-ai/sdk";
 import { requireKey } from "./util.mjs";
 
-const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-4-8";
+const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
 
 let client;
 function getClient() {

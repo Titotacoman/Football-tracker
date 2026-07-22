@@ -9,6 +9,10 @@
     "test:fd": "node scripts/test-football-data.mjs",
     "test:tsdb": "node scripts/test-thesportsdb.mjs",
     "test:providers": "node scripts/test-api-football.mjs && node scripts/test-football-data.mjs && node scripts/test-thesportsdb.mjs",
-    "poll": "node scripts/poll-fd.mjs"
+    "poll": "node scripts/poll-fd.mjs",
+    "gapfill": "node scripts/gapfill.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.112.5"
   }
 }

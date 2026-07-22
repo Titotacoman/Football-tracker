@@ -119,6 +119,19 @@ async function espnGet(url) {
   return res.body;
 }
 
+// Apply broadcast strings to existing matches via PATCH (never upsert — a
+// partial matches row would violate NOT NULL columns). Grouped by value so
+// each distinct broadcast is one request over an id/espn_id in-list.
+async function applyBroadcasts(keyCol, updates) {
+  const byValue = new Map();
+  for (const u of updates) {
+    (byValue.get(u.broadcast) ?? byValue.set(u.broadcast, []).get(u.broadcast)).push(u[keyCol]);
+  }
+  for (const [value, ids] of byValue) {
+    await db.update("matches", { [keyCol]: `in.(${ids.join(",")})` }, { broadcast: value });
+  }
+}
+
 const dayOf = (iso) => iso.slice(0, 10);
 const wordsOf = (name) => new Set(nameKey(name).split(" ").filter((w) => w.length > 2));
 const shareWord = (a, b) => [...a].some((w) => b.has(w));
@@ -165,7 +178,7 @@ async function attachFdBroadcasts(league, code) {
     }
   }
   if (updates.length) {
-    await db.upsert("matches", updates, "id");
+    await applyBroadcasts("id", updates);
     console.log(`${code}: broadcast attached to ${updates.length} match(es)`);
   }
 }
@@ -195,6 +208,13 @@ async function pollEspnLeague(code) {
   const teamIds = new Map(teamRows.map((t) => [t.espn_id, t.id]));
 
   await db.upsert("matches", events.map((e) => normalizeEspnMatch(e, league.id, teamIds)), "espn_id");
+
+  // Broadcast: targeted update, non-null only, so a blank ESPN listing never
+  // overwrites a value from another source (e.g. the Claude gap-filler).
+  const bcasts = events
+    .map((e) => ({ espn_id: Number(e.id), broadcast: espnBroadcast(e.competitions[0]) }))
+    .filter((u) => u.broadcast);
+  if (bcasts.length) await applyBroadcasts("espn_id", bcasts);
 
   // Standings (leagues only — tournaments 404 or return empty).
   try {

@@ -64,11 +64,12 @@ export function normalizeEspnMatch(event, leagueId, teamIds) {
       : Number(home.score) > Number(away.score) ? "HOME_TEAM"
       : Number(away.score) > Number(home.score) ? "AWAY_TEAM"
       : "DRAW",
-    broadcast: espnBroadcast(comp),
     espn_id: Number(event.id),
     last_updated: new Date().toISOString(),
   };
 }
+// Broadcast is applied separately (see poll.mjs) so a null value never
+// clobbers a value written by another source (e.g. the Claude gap-filler).
 
 // entry: one standings entry; grp: conference/group label or null.
 export function normalizeEspnStandingRow(entry, leagueId, season, teamIds, grp, fallbackPosition) {
